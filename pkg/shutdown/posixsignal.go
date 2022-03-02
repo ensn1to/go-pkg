@@ -1,11 +1,9 @@
-package shutdownmanagers
+package shutdown
 
 import (
 	"os"
 	"os/signal"
 	"syscall"
-
-	"github.com/ensn1to/go-pkg/shutdown"
 )
 
 const ShutdownManagerName = "PosixSignalManager"
@@ -35,7 +33,7 @@ func (posixSignalManager *PosixSignalManager) GetName() string {
 }
 
 // Start starts to listening the posix signals
-func (posixSignalManager *PosixSignalManager) Start(gs shutdown.GracefulShutdowner) error {
+func (posixSignalManager *PosixSignalManager) Start(gs GracefulShutdowner) error {
 	go func() {
 		// buffer channel but not sync channel
 		c := make(chan os.Signal, 1)
