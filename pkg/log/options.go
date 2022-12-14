@@ -3,6 +3,7 @@ package log
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/pflag"
@@ -10,15 +11,15 @@ import (
 )
 
 const (
-	flagLevel             = "log.level"
-	flagDisableCaller     = "log.disable-caller"
-	flagDisableStacktrace = "log.disable-stacktrace"
-	flagFormat            = "log.format"
-	flagEnableColor       = "log.enable-color"
-	flagOutputPaths       = "log.output-paths"
-	flagErrorOutputPaths  = "log.error-output-paths"
-	flagDevelopment       = "log.development"
-	flagName              = "log.name"
+	flagLevel             = "logs.level"
+	flagDisableCaller     = "logs.disable-caller"
+	flagDisableStacktrace = "logs.disable-stacktrace"
+	flagFormat            = "logs.format"
+	flagEnableColor       = "logs.enable-color"
+	flagOutputPaths       = "logs.output-paths"
+	flagErrorOutputPaths  = "logs.error-output-paths"
+	flagDevelopment       = "logs.development"
+	flagName              = "logs.name"
 
 	consoleFormat = "console" // txt
 	jsonFormat    = "json"
@@ -40,27 +41,24 @@ type Options struct {
 	CommonFields      []string `json:"common-fields" mapstructure:"common-fields"` // common log fields, eg: requestId, username
 }
 
-// NewOption creates Options with default params
 func NewOptions() *Options {
 	return &Options{
 		Level:             zapcore.InfoLevel.String(),
 		DisableCaller:     false,
 		DisableStacktrace: false,
 		Format:            consoleFormat,
-		EnableColor:       false,
+		EnableColor:       true,
 		Development:       false,
-		OutputPaths:       []string{"stdout"},
-		ErrorOutputPaths:  []string{"stderr"},
+		OutputPaths:       []string{os.Stdout.Name()},
+		ErrorOutputPaths:  []string{os.Stderr.Name()},
 		CommonFields:      []string{keyRequestID},
 	}
 }
 
-// Validate validates the options fields
 func (o *Options) Validate() []error {
 	var errs []error
 
 	var zapLevel zapcore.Level
-	// string to zaplevel type
 	if err := zapLevel.UnmarshalText([]byte(o.Level)); err != nil {
 		errs = append(errs, err)
 	}
@@ -73,7 +71,6 @@ func (o *Options) Validate() []error {
 	return errs
 }
 
-// AddFlags adds flags for log to the specified FlagSet object
 func (o *Options) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&o.Level, flagLevel, o.Level, "Minimum log output `LEVEL`.")
 	fs.BoolVar(&o.DisableCaller, flagDisableCaller, o.DisableCaller, "Disable output of caller information in the log.")

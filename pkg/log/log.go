@@ -5,6 +5,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/opentracing/opentracing-go"
+	tag "github.com/opentracing/opentracing-go/ext"
+	"github.com/uber/jaeger-client-go"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -34,20 +37,22 @@ type Logger interface {
 	Fatalf(format string, v ...interface{})
 	Fatalw(msg string, keysAndValues ...interface{})
 
-	// add some key-value pairs of context to a logger
 	WithValues(keysAndValue ...interface{}) Logger
 
 	WithName(string) Logger
 
-	// WithContext returns a copy of context in which the log value is set.
+	C(ctx context.Context) Logger
+
 	WithContext(ctx context.Context) context.Context
 
-	// flush any buffered log entries. Applications should take care to call Sync before exiting
 	Flush()
 }
 
 type zapLogger struct {
-	zapLogger *zap.Logger
+	zapLogger  *zap.Logger
+	span       opentracing.Span
+	spanFields []Field
+	isSpan     bool
 }
 
 var (
@@ -56,7 +61,7 @@ var (
 	commonFields []string
 )
 
-func Init(opts *Options) {
+func ResetDefault(opts *Options) {
 	mu.Lock()
 	defer mu.Unlock()
 	std = New(opts)
@@ -76,7 +81,6 @@ func New(opts *Options) *zapLogger {
 
 	// info -> INFO, error -> ERROR
 	encodeLevel := zapcore.CapitalLevelEncoder
-
 	// prints log with color when output to local
 	if opts.Format == consoleFormat && opts.EnableColor {
 		encodeLevel = zapcore.CapitalColorLevelEncoder
@@ -217,6 +221,11 @@ func Debug(msg string, fields ...Field) {
 }
 
 func (l *zapLogger) Debug(msg string, fields ...Field) {
+	if l.isSpan {
+		l.logToSpan("debug", msg, fields...)
+		fields = append(l.spanFields, fields...)
+	}
+
 	l.zapLogger.Debug(msg, fields...)
 }
 
@@ -244,6 +253,10 @@ func Info(msg string, fields ...Field) {
 }
 
 func (l *zapLogger) Info(msg string, fields ...Field) {
+	if l.isSpan {
+		l.logToSpan("info", msg, fields...)
+		fields = append(l.spanFields, fields...)
+	}
 	l.zapLogger.Info(msg, fields...)
 }
 
@@ -271,6 +284,11 @@ func Warn(msg string, fields ...Field) {
 }
 
 func (l *zapLogger) Warn(msg string, fields ...Field) {
+	if l.isSpan {
+		l.logToSpan("warn", msg, fields...)
+		fields = append(l.spanFields, fields...)
+	}
+
 	l.zapLogger.Warn(msg, fields...)
 }
 
@@ -298,6 +316,12 @@ func Error(msg string, fields ...Field) {
 }
 
 func (l *zapLogger) Error(msg string, fields ...Field) {
+	if l.isSpan {
+		l.logToSpan("error", msg, fields...)
+		tag.Error.Set(l.span, true)
+		fields = append(l.spanFields, fields...)
+	}
+
 	l.zapLogger.Error(msg, fields...)
 }
 
@@ -325,6 +349,12 @@ func Panic(msg string, fields ...Field) {
 }
 
 func (l *zapLogger) Panic(msg string, fields ...Field) {
+	if l.isSpan {
+		l.logToSpan("panic", msg, fields...)
+		tag.Error.Set(l.span, true)
+		fields = append(l.spanFields, fields...)
+	}
+
 	l.zapLogger.Panic(msg, fields...)
 }
 
@@ -352,6 +382,12 @@ func Fatal(msg string, fields ...Field) {
 }
 
 func (l *zapLogger) Fatal(msg string, fields ...Field) {
+	if l.isSpan {
+		l.logToSpan("fatal", msg, fields...)
+		tag.Error.Set(l.span, true)
+		fields = append(l.spanFields, fields...)
+	}
+
 	l.zapLogger.Fatal(msg, fields...)
 }
 
@@ -374,11 +410,11 @@ func (l *zapLogger) Fatalw(msg string, keysAndValues ...interface{}) {
 }
 
 // C with context value
-func C(ctx context.Context) *zapLogger {
+func C(ctx context.Context) Logger {
 	return std.C(ctx)
 }
 
-func (l *zapLogger) C(ctx context.Context) *zapLogger {
+func (l *zapLogger) C(ctx context.Context) Logger {
 	// deep copy
 	lg := func(logger *zapLogger) *zapLogger {
 		return &(*logger)
@@ -395,4 +431,27 @@ func (l *zapLogger) C(ctx context.Context) *zapLogger {
 	}
 
 	return lg
+}
+
+func J(ctx context.Context) Logger {
+	return std.J(ctx)
+}
+
+func (l *zapLogger) J(ctx context.Context) Logger {
+	ls := func(logger *zapLogger) *zapLogger {
+		logger.isSpan = true
+		return &(*logger)
+	}(l)
+
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		ls.span = span
+		if jaegerCtx, ok := span.Context().(jaeger.SpanContext); ok {
+			l.spanFields = []Field{
+				zap.String("trace_id", jaegerCtx.TraceID().String()),
+				zap.String("span_id", jaegerCtx.SpanID().String()),
+			}
+		}
+	}
+
+	return ls
 }
